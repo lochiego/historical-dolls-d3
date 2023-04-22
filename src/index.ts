@@ -1,18 +1,18 @@
-import * as d3 from "d3";
-
-const CURRENT_YEAR = new Date().getFullYear();
+import Chart from 'chart.js/auto';
+import 'chartjs-adapter-luxon';
+import * as csv from 'jquery-csv';
 
 type DollData = {
   name: string;
-  released: Number;
-  retired?: Number;
+  released: number;
+  retired?: number;
   era: [number, number];
   location: string;
   people: string;
   backdrop?: string;
 }
 
-function parseDollData(d: d3.DSVRowString<string>): DollData {
+function parseDollData(d: {[column: string]: string}): DollData {
   const released = +d["Released"]!;
   return {
     name: d["Full name"]!,
@@ -24,86 +24,91 @@ function parseDollData(d: d3.DSVRowString<string>): DollData {
   };
 }
 
+const csvData = await fetch("https://raw.githubusercontent.com/lochiego/historical-dolls-d3/master/doll-dataset.csv?token=GHSAT0AAAAAACBWBOCVZNCIH3TRQO6MXL7WZCDKNQQ").then(r => {
+console.log('response', r);
+return r.text()
+});
 
-// set the dimensions and margins of the graph
-const margin = { top: 10, right: 30, bottom: 30, left: 60 },
-  width = 460 - margin.left - margin.right,
-  height = 400 - margin.top - margin.bottom;
+const dolls = csv.toObjects(csvData).slice(0, -1).map(parseDollData) as DollData[];
 
-const svg = d3.select("#historical-chart")
-  .append('svg')
-  .attr("width", width)
-  .attr("height", height);
+// Add X axis
+let eraMin = Number.MAX_SAFE_INTEGER;
+let eraMax = Number.MIN_SAFE_INTEGER;
 
-  d3.csv("../doll-dataset.csv", parseDollData).then(csvData => {
-    const trimmedData = csvData.slice(0, -1);
-
-    // Add X axis
-    let eraMin = Number.MAX_SAFE_INTEGER;
-    let eraMax = Number.MIN_SAFE_INTEGER;
-
-    // Establish boundings
-    trimmedData.forEach((d) => {
-      const [eraStart, eraEnd] = d.era;
-      
-      if (eraStart < eraMin) {
-        eraMin = eraStart;
-      }
-      if (eraMax < eraEnd) {
-        eraMax = eraEnd;
-      }
-    });
-
-    console.table({eraMin, eraMax});
-
-    const x = d3.scaleLinear().domain([eraMin, eraMax]).range([0, width]);
-    svg
-      .append("g")
-      .attr("transform", `translate(0, ${height})`)
-      .call(d3.axisBottom(x));
-
-      
-    const y = d3.scaleLinear().domain([0, trimmedData.length]).range([0, height]);
-    svg
-      .append("g")
-      .call(d3.axisLeft(y));
-
-    svg.append("g")
-      .selectAll("rect")
-      .data(trimmedData)
-      .join("rect")
-        .attr("x", d => x(d.era[0]))
-        .attr("width", d => Math.max(1, x(d.era[1])))
-        .attr("y", (d, i) => y(i + 1))
-        .attr("height", Math.round(height / trimmedData.length) - 2)
-  });
-
-
-// Read the data
-// d3.csv(
-//   "https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/iris.csv"
-//   ).then(function (csvdata) {
-//     // Add X axis
-//     const x = d3.scaleLinear().domain([3, 9]).range([0, width]);
-//     const xAxis = svg
-//       .append("g")
-//       .attr("transform", `translate(0, ${height})`)
-//       .call(d3.axisBottom(x));
+// Establish boundings
+dolls.forEach((d) => {
+  const [eraStart, eraEnd] = d.era;
   
-//     // Add Y axis
-//     const y = d3.scaleLinear().domain([0, 9]).range([height, 0]);
-//     svg.append("g").call(d3.axisLeft(y));
-  
-//     // Add dots
-//     svg.append("g")
-//        .selectAll("circle")
-//        .data(csvdata)
-//        .join("circle")
-//        .attr("cx", function (d: any) {
-//          return x(d.Sepal_Length);
-//       })
-//       .attr("cy", function (d: any) {
-//          return y(d.Petal_Length);
-//       })
-//       .attr("r", 5);
-//   });
+  if (eraStart < eraMin) {
+    eraMin = eraStart;
+  }
+  if (eraMax < eraEnd) {
+    eraMax = eraEnd;
+  }
+});
+
+new Chart(
+  document.getElementById('release-chart') as HTMLCanvasElement,
+  {
+    type: 'scatter',
+    data: {
+      labels: dolls.map(d => d.name),
+      datasets: [
+        {
+          label: 'Historical',
+          data: dolls.map(d => ({
+            x: new Date(d.era[0], 1, 1),
+            y: new Date(d.released, 1, 1),
+          })),
+        }
+      ]
+    },
+    options: {
+      plugins: {
+        title: {
+          text: 'American Girl Dolls',
+          display: true,
+        },
+        tooltip: {
+          callbacks: {
+            title(tooltipItems) {
+              return tooltipItems.map(i => dolls[i.dataIndex].name).join(', ')
+            },
+            label({dataIndex}) {
+              const {era, released, retired} = dolls[dataIndex];
+              return `Era: ${
+                era.join('-')
+              }. Released in ${released}.${retired ? ` Retired in ${retired}` : ''}`;
+            },
+          }
+        }
+      },
+      indexAxis: 'y',
+      scales: {
+        x: {
+          type: 'time',
+          time: {
+            unit: 'year',
+            tooltipFormat: 'y',
+          },
+          title: {
+            text: 'Historical Year',
+            display: true,
+          },
+        },
+        y: {
+          type: 'time',
+          time: {
+            unit: 'year',
+            tooltipFormat: 'y',
+          },
+          position: 'right',
+          title: {
+            text: 'Year Introduced',
+            display: true,
+          },
+        }
+      }
+    },
+  }
+)
